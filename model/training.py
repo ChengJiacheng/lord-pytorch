@@ -7,11 +7,11 @@ import numpy as np
 import torch
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from model.modules import LordModel, VGGDistance
-from model.utils import AverageMeter
+from model.utils import AverageMeter, NamedTensorDataset
 
 
 class Lord:
@@ -24,13 +24,15 @@ class Lord:
 		self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 	def train(self, imgs, classes, model_dir, tensorboard_dir):
-		imgs = torch.from_numpy(imgs).permute(0, 3, 1, 2)
-		class_ids = torch.from_numpy(classes.astype(int))
-		img_ids = torch.arange(imgs.shape[0])
+		data = dict(
+			img=torch.from_numpy(imgs).permute(0, 3, 1, 2),
+			img_id=torch.from_numpy(np.arange(imgs.shape[0])),
+			class_id=torch.from_numpy(classes.astype(np.int64))
+		)
 
-		tensor_dataset = TensorDataset(imgs, img_ids, class_ids)
+		dataset = NamedTensorDataset(data)
 		data_loader = DataLoader(
-			tensor_dataset, batch_size=self.config['train']['batch_size'],
+			dataset, batch_size=self.config['train']['batch_size'],
 			shuffle=True, sampler=None, batch_sampler=None,
 			num_workers=1, pin_memory=True, drop_last=True
 		)
@@ -57,57 +59,65 @@ class Lord:
 			eta_min=self.config['train']['learning_rate']['min']
 		)
 
-		with SummaryWriter(log_dir=os.path.join(tensorboard_dir)) as summary:
-			train_loss = AverageMeter()
-			for epoch in range(1, self.config['train']['n_epochs'] + 1):
-				self.model.train()
-				train_loss.reset()
+		summary = SummaryWriter(log_dir=tensorboard_dir)
 
-				with tqdm(iterable=data_loader) as pbar:
-					for batch in pbar:
-						batch_imgs, batch_img_ids, batch_class_ids = (tensor.to(self.device) for tensor in batch)
-						generated_imgs, batch_content_codes, batch_class_codes = self.model(batch_img_ids, batch_class_ids)
+		train_loss = AverageMeter()
+		for epoch in range(self.config['train']['n_epochs']):
+			self.model.train()
+			train_loss.reset()
 
-						optimizer.zero_grad()
+			pbar = tqdm(iterable=data_loader)
+			for batch in pbar:
+				batch = {name: tensor.to(self.device) for name, tensor in batch.items()}
 
-						content_penalty = torch.sum(batch_content_codes ** 2, dim=1).mean()
-						loss = criterion(generated_imgs, batch_imgs) + self.config['content_decay'] * content_penalty
-						loss.backward()
+				optimizer.zero_grad()
+				out = self.model(batch['img_id'], batch['class_id'])
 
-						optimizer.step()
-						scheduler.step()
+				content_penalty = torch.sum(out['content_code'] ** 2, dim=1).mean()
+				loss = criterion(out['img'], batch['img']) + self.config['content_decay'] * content_penalty
 
-						train_loss.update(loss.item())
-						pbar.set_description_str('epoch #{}'.format(epoch))
-						pbar.set_postfix(loss=train_loss.avg)
+				loss.backward()
+				optimizer.step()
+				scheduler.step()
 
-				torch.save(self.model.state_dict(), os.path.join(model_dir, 'model.pth'))
+				train_loss.update(loss.item())
+				pbar.set_description_str('epoch #{}'.format(epoch))
+				pbar.set_postfix(loss=train_loss.avg)
 
-				self.model.eval()
-				fixed_sample_img = self.evaluate(imgs, img_ids, class_ids, randomized=False)
-				random_sample_img = self.evaluate(imgs, img_ids, class_ids, randomized=True)
+			pbar.close()
+			torch.save(self.model.state_dict(), os.path.join(model_dir, 'model.pth'))
 
-				summary.add_scalar(tag='loss', scalar_value=train_loss.avg, global_step=epoch)
-				summary.add_image(tag='sample-fixed', img_tensor=fixed_sample_img, global_step=epoch)
-				summary.add_image(tag='sample-random', img_tensor=random_sample_img, global_step=epoch)
+			fixed_sample_img = self.evaluate(dataset, randomized=False)
+			random_sample_img = self.evaluate(dataset, randomized=True)
 
-	def evaluate(self, imgs, img_ids, class_ids, n_samples=5, randomized=False):
+			summary.add_scalar(tag='loss', scalar_value=train_loss.avg, global_step=epoch)
+			summary.add_image(tag='sample-fixed', img_tensor=fixed_sample_img, global_step=epoch)
+			summary.add_image(tag='sample-random', img_tensor=random_sample_img, global_step=epoch)
+
+		summary.close()
+
+	def evaluate(self, dataset, n_samples=5, randomized=False):
+		self.model.eval()
+
 		if randomized:
 			random = np.random
 		else:
 			random = np.random.RandomState(seed=1234)
 
-		img_idx = random.choice(imgs.size(0), size=n_samples, replace=False)
-		imgs, img_ids, class_ids = (imgs[img_idx], img_ids[img_idx].to(self.device), class_ids[img_idx].to(self.device))
+		img_idx = torch.from_numpy(random.choice(len(dataset), size=n_samples, replace=False))
 
-		blank = np.zeros_like(imgs[0])
-		output = [np.concatenate([blank] + list(imgs), axis=2)]
+		samples = dataset[img_idx]
+		samples = {name: tensor.to(self.device) for name, tensor in samples.items()}
+
+		blank = torch.ones_like(samples['img'][0])
+		output = [torch.cat([blank] + list(samples['img']), dim=2)]
 		for i in range(n_samples):
-			converted_imgs = [imgs[i]] + [
-				self.model(img_ids[[j]], class_ids[[i]])[0][0].detach().cpu()
-				for j in range(n_samples)
-			]
+			converted_imgs = [samples['img'][i]]
 
-			output.append(np.concatenate(converted_imgs, axis=2))
+			for j in range(n_samples):
+				out = self.model(samples['img_id'][[j]], samples['class_id'][[i]])
+				converted_imgs.append(out['img'][0])
 
-		return np.concatenate(output, axis=1)
+			output.append(torch.cat(converted_imgs, dim=2))
+
+		return torch.cat(output, dim=1)

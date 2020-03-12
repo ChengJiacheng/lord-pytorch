@@ -22,7 +22,11 @@ class LordModel(nn.Module):
 		class_adain_params = self.modulation(class_code)
 		generated_img = self.generator(content_code, class_adain_params)
 
-		return generated_img, content_code, class_code
+		return {
+			'img': generated_img,
+			'content_code': content_code,
+			'class_code': class_code
+		}
 
 	def init(self):
 		self.apply(self.weights_init)
