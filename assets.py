@@ -1,6 +1,5 @@
 import os
 import shutil
-from datetime import datetime
 
 
 class AssetManager:
@@ -24,10 +23,6 @@ class AssetManager:
 		if not os.path.exists(self.__tensorboard_dir):
 			os.mkdir(self.__tensorboard_dir)
 
-		self.__out_dir = os.path.join(self.__base_dir, 'out')
-		if not os.path.exists(self.__out_dir):
-			os.mkdir(self.__out_dir)
-
 	def get_preprocess_file_path(self, data_name):
 		return os.path.join(self.__preprocess_dir, data_name + '.npz')
 
@@ -49,17 +44,9 @@ class AssetManager:
 		self.__recreate_dir(tensorboard_dir)
 		return tensorboard_dir
 
-	def create_prediction_dir(self, model_name):
-		prediction_dir = os.path.join(self.__out_dir, model_name, '{:%Y-%m-%d_%H-%M-%S}'.format(datetime.now()))
-		if not os.path.exists(prediction_dir):
-			os.makedirs(prediction_dir)
-
-		return prediction_dir
-
 	@staticmethod
 	def __recreate_dir(path):
 		if os.path.exists(path):
 			shutil.rmtree(path)
 
 		os.makedirs(path)
-
