@@ -44,7 +44,7 @@ class Lord:
 
 		optimizer = Adam([
 			{
-				'params': self.model.generator.parameters(),
+				'params': itertools.chain(self.model.modulation.parameters(), self.model.generator.parameters()),
 				'lr': self.config['train']['learning_rate']['generator']
 			},
 			{
