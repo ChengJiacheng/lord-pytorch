@@ -4,7 +4,7 @@ from torch import nn
 from torchvision import models
 
 
-class LordModel(nn.Module):
+class LatentModel(nn.Module):
 
 	def __init__(self, config):
 		super().__init__()
@@ -35,6 +35,34 @@ class LordModel(nn.Module):
 	def weights_init(m):
 		if isinstance(m, nn.Embedding):
 			nn.init.uniform_(m.weight, a=-0.05, b=0.05)
+
+
+class AmortizedModel(nn.Module):
+
+	def __init__(self, config):
+		super().__init__()
+
+		self.config = config
+
+		self.content_encoder = Encoder(config['img_shape'], config['content_dim'])
+		self.class_encoder = Encoder(config['img_shape'], config['class_dim'])
+		self.modulation = Modulation(config['class_dim'], config['n_adain_layers'], config['adain_dim'])
+		self.generator = Generator(config['content_dim'], config['n_adain_layers'], config['adain_dim'], config['img_shape'])
+
+	def forward(self, img):
+		return self.convert(img, img)
+
+	def convert(self, content_img, class_img):
+		content_code = self.content_encoder(content_img)
+		class_code = self.class_encoder(class_img)
+		class_adain_params = self.modulation(class_code)
+		generated_img = self.generator(content_code, class_adain_params)
+
+		return {
+			'img': generated_img,
+			'content_code': content_code,
+			'class_code': class_code
+		}
 
 
 class RegularizedEmbedding(nn.Module):
@@ -142,6 +170,48 @@ class Generator(nn.Module):
 		x = self.adain_conv_layers(x)
 		x = self.last_conv_layers(x)
 
+		return x
+
+
+class Encoder(nn.Module):
+
+	def __init__(self, img_shape, code_dim):
+		super().__init__()
+
+		self.conv_layers = nn.Sequential(
+			nn.Conv2d(in_channels=img_shape[-1], out_channels=64, kernel_size=7, stride=1, padding=3),
+			nn.LeakyReLU(),
+
+			nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1),
+			nn.LeakyReLU(),
+
+			nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1),
+			nn.LeakyReLU(),
+
+			nn.Conv2d(in_channels=256, out_channels=256, kernel_size=4, stride=2, padding=1),
+			nn.LeakyReLU(),
+
+			nn.Conv2d(in_channels=256, out_channels=256, kernel_size=4, stride=2, padding=1),
+			nn.LeakyReLU()
+		)
+
+		self.fc_layers = nn.Sequential(
+			nn.Linear(in_features=4096, out_features=256),
+			nn.LeakyReLU(),
+
+			nn.Linear(in_features=256, out_features=256),
+			nn.LeakyReLU(),
+
+			nn.Linear(256, code_dim)
+		)
+
+	def forward(self, x):
+		batch_size = x.shape[0]
+
+		x = self.conv_layers(x)
+		x = x.view((batch_size, -1))
+
+		x = self.fc_layers(x)
 		return x
 
 

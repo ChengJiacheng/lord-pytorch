@@ -86,13 +86,37 @@ def train(args):
 	config.update(base_config)
 
 	lord = Lord(config)
-	lord.train(
+	lord.train_latent(
 		imgs=imgs,
 		classes=data['classes'],
 
 		model_dir=model_dir,
 		tensorboard_dir=tensorboard_dir
 	)
+
+	lord.save(model_dir, latent=True, amortized=False)
+
+
+def train_encoders(args):
+	assets = AssetManager(args.base_dir)
+	model_dir = assets.get_model_dir(args.model_name)
+	tensorboard_dir = assets.get_tensorboard_dir(args.model_name)
+
+	data = np.load(assets.get_preprocess_file_path(args.data_name))
+	imgs = data['imgs'].astype(np.float32) / 255.0
+
+	lord = Lord()
+	lord.load(model_dir, latent=True, amortized=False)
+
+	lord.train_amortized(
+		imgs=imgs,
+		classes=data['classes'],
+
+		model_dir=model_dir,
+		tensorboard_dir=tensorboard_dir
+	)
+
+	lord.save(model_dir, latent=False, amortized=True)
 
 
 def main():
@@ -127,6 +151,12 @@ def main():
 	train_parser.add_argument('-mn', '--model-name', type=str, required=True)
 	train_parser.add_argument('-g', '--gpus', type=int, default=1)
 	train_parser.set_defaults(func=train)
+
+	train_encoders_parser = action_parsers.add_parser('train-encoders')
+	train_encoders_parser.add_argument('-dn', '--data-name', type=str, required=True)
+	train_encoders_parser.add_argument('-mn', '--model-name', type=str, required=True)
+	train_encoders_parser.add_argument('-g', '--gpus', type=int, default=1)
+	train_encoders_parser.set_defaults(func=train_encoders)
 
 	args = parser.parse_args()
 	args.func(args)
