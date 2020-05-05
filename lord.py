@@ -149,13 +149,11 @@ def main():
 	train_parser = action_parsers.add_parser('train')
 	train_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	train_parser.add_argument('-mn', '--model-name', type=str, required=True)
-	train_parser.add_argument('-g', '--gpus', type=int, default=1)
 	train_parser.set_defaults(func=train)
 
 	train_encoders_parser = action_parsers.add_parser('train-encoders')
 	train_encoders_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	train_encoders_parser.add_argument('-mn', '--model-name', type=str, required=True)
-	train_encoders_parser.add_argument('-g', '--gpus', type=int, default=1)
 	train_encoders_parser.set_defaults(func=train_encoders)
 
 	args = parser.parse_args()

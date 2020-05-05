@@ -55,8 +55,6 @@ Given a preprocessed train set, training a model with latent optimization (first
 lord.py --base-dir <output-root-dir> train
     --data-name <input-preprocessed-data-filename>
     --model-name <output-model-name>
-    --content-dim <content-code-size>
-    --class-dim <class-code-size>
 ```
 
 Training encoders for amortized inference (second stage) can be done as follows:
